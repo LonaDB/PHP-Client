@@ -1,110 +1,211 @@
 <?php
 
-class DatabaseClient
-{
+class LonaDB {
+    private $host;
+    private $port;
     private $name;
     private $password;
-    private $port;
-    private $host;
-    private $data;
 
-    public function __construct($host, $port, $name, $password)
-    {
+    public function __construct($host, $port, $name, $password) {
+        $this->host = $host;
+        $this->port = $port;
         $this->name = $name;
         $this->password = $password;
-        $this->port = $port;
-        $this->host = $host;
-        $this->data = array();
     }
 
-    private function makeId($length)
-    {
-        $characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890abcdefghijklmnopqrstuvwxyz';
-        $result = '';
+    private function makeid($length) {
+        $result = "";
+        $characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890abcdefghijklmnopqrstuvwxyz";
         $counter = 0;
+
         while ($counter < $length) {
-            $result .= $characters[rand(0, strlen($characters) - 1)];
+            $result .= $characters[mt_rand(0, strlen($characters) - 1)];
             $counter += 1;
         }
+
         return $result;
     }
 
-    private function sendRequest($payload)
-    {
-        $client = stream_socket_client($this->host . ':' . $this->port, $errno, $errstr);
-        $processId = $this->makeId(5);
-
-        stream_set_blocking($client, 0);
-
-        $requestData = json_encode($payload) . "\n";
-        fwrite($client, $requestData);
-
-        $response = '';
-        $timeout = 3; 
-        $start = time();
-
-        while ((time() - $start) < $timeout) {
-            $response .= fread($client, 8192);
-            if (strpos($response, "\n") !== false) {
-                break;
-            }
-            usleep(1000);
+    private function sendRequest($action, $data) {
+        $socket = socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
+        if ($socket === false) {
+            return ["err" => socket_strerror(socket_last_error())];
         }
 
-        fclose($client);
+        $result = socket_connect($socket, $this->host, $this->port);
+        if ($result === false) {
+            return ["err" => socket_strerror(socket_last_error($socket))];
+        }
 
-        return json_decode(trim($response), true);
+        $processID = $this->makeid(5);
+
+        $request = json_encode([
+            "action" => $action,
+            "login" => [
+                "name" => $this->name,
+                "password" => $this->password
+            ],
+            "process" => $processID
+        ] + $data);
+
+        socket_write($socket, $request, strlen($request));
+
+        $response = socket_read($socket, 2048);
+        socket_close($socket);
+
+        return json_decode($response, true);
     }
 
-    public function createTable($name)
-    {
-        $payload = [
-            'action' => 'create_table',
-            'table' => ['name' => $name],
-            'login' => [
-                'name' => $this->name,
-                'password' => $this->password
-            ],
-            'process' => $this->makeId(5)
+    public function getTables($user) {
+        $data = [
+            "user" => $user
         ];
 
-        return $this->sendRequest($payload);
+        return $this->sendRequest("get_tables", $data);
     }
 
-    public function set($table, $name, $value)
-    {
-        $payload = [
-            'action' => 'set_variable',
-            'table' => ['name' => $table],
-            'variable' => [
-                'name' => $name,
-                'value' => $value
-            ],
-            'login' => [
-                'name' => $this->name,
-                'password' => $this->password
-            ],
-            'process' => $this->makeId(5)
+    public function getTableData($table) {
+        $data = [
+            "table" => $table
         ];
 
-        return $this->sendRequest($payload);
+        return $this->sendRequest("get_table_data", $data);
+    }
+  
+  	public function deleteTable($table) {
+    	$data = [
+          "table" => ["name" => $table]
+        ];
+          
+        return $this->sendRequest("delete_table", $data);
+    }
+  
+  	public function createTable($table) {
+      $data = [
+        "table" => ["name" => $table]
+      ];
+        
+      return $this->sendRequest("create_table", $data);
+    }
+  
+  	public function set($table, $name, $value) {
+    	$data = [
+          "table" => ["name" => $table],
+          "variable" => [
+            "name" => $name,
+            "value" => $value
+          ]
+        ];
+      
+      return $this->sendRequest("set_variable", $data);
+    }
+  
+  	public function delete($table, $name){
+      $data = [
+        "table" => ["name" => $table],
+        "variable" => ["name" => $name]
+      ];
+        
+      return $this->sendRequest("remove_variable", $data);
+    }
+  
+  	public function get($table, $name){
+    	$data = [
+          "table" => ["name" => $table],
+          "variable" => [
+            "name" => $name
+          ]
+        ];
+      
+      return $this->sendRequest("get_variable", $data);
+    }
+  
+  	public function getUsers(){
+    	$data = [];
+      
+      return $this->sendRequest("get_users", $data);
+    }
+  
+  	public function createUser($name, $pass){
+    	$data = [
+        	"user" => [
+            	"name" => $name,
+              	"password" => $pass
+            ]
+        ];
+      
+      return $this->sendRequest("create_user", $data);
+    }
+  
+  	public function deleteUser($name){
+    	$data = [
+        	"user" => [
+            	"name" => $name
+            ]
+        ];
+      
+      return $this->sendRequest("delete_user", $data);
+    }
+  
+  	public function checkPassword($name, $pass){
+    	$data = [
+        	"checkPass" => [
+            	"name" => $name,
+              	"pass" => $pass
+            ]
+        ];
+      
+      return $this->sendRequest("check_password", $data);
+    }
+  
+  	public function checkPermission($name, $permission){
+    	$data = [
+        	"permission" => [
+            	"user" => $name,
+              	"name" => $permission
+            ]
+        ];
+      
+      return $this->sendRequest("check_permission", $data);
+    }
+  
+	public function removePermission($name, $permission){
+    	$data = [
+        	"permission" => [
+            	"user" => $name,
+              	"name" => $permission
+            ]
+        ];
+      
+      return $this->sendRequest("remove_permission", $data);
+    }
+  
+  	public function getPermissionsRaw($name){
+    	$data = [
+            "user" => $name
+        ];
+      
+      return $this->sendRequest("get_permissions_raw", $data);
     }
 
-    public function delete($table, $name)
-    {
-        $payload = [
-            'action' => 'remove_variable',
-            'table' => ['name' => $table],
-            'variable' => [
-                'name' => $name
-            ],
-            'login' => [
-                'name' => $this->name,
-                'password' => $this->password
-            ],
-            'process' => $this->makeId(5)
+  	public function addPermission($name){
+    	$data = [
+        	"permission" => [
+            	"user" => $name,
+              	"name" => $permission
+            ]
+        ];
+      
+      return $this->sendRequest("add_permission", $data);
+    }
+
+    public function eval($func) {
+        $data = [
+            "function" => $func
         ];
 
-        return $this->sendRequest($payload);
+        return $this->sendRequest("eval", $data);
     }
 }
+
+?>
